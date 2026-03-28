@@ -63,6 +63,12 @@ func worker(id int, jobs <-chan Job, results chan<- Result, wg *sync.WaitGroup) 
 			results <- Result{DBName: job.DBConfig.Name, Error: fmt.Errorf("upload error: %w", err)}
 			continue
 		}
+
+		if err := os.Remove(filePath); err != nil {
+			results <- Result{DBName: job.DBConfig.Name, Error: fmt.Errorf("delete error: %w", err)}
+			continue
+		}
+
 		results <- Result{DBName: job.DBConfig.Name, Error: nil}
 	}
 }

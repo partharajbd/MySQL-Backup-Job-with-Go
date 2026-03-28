@@ -1,3 +1,6 @@
 .idea
 .env
 **.sql
+
+# Built executable file
+/mysql-database-backup-manager
