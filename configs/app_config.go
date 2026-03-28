@@ -5,4 +5,5 @@ type AppConfig struct {
 	S3Bucket   string
 	Region     string
 	S3Endpoint string
+	S3RootDir  string
 }

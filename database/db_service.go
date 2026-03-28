@@ -10,9 +10,12 @@ import (
 )
 
 func DumpDatabase(db configs.DBConfig, backupDir string) (string, error) {
+	fmt.Println("> Dumping database: ", db.Name)
 	timestamp := time.Now().Format("20060102_150405")
-	fileName := fmt.Sprintf("%s_%s.sql", db.Name, timestamp)
+	fileName := filepath.Join(db.Name, fmt.Sprintf("%s_%s.sql", db.Name, timestamp))
 	path := filepath.Join(backupDir, fileName)
+
+	os.MkdirAll(filepath.Dir(path), os.ModePerm)
 
 	cmd := exec.Command(
 		"mysqldump",
@@ -30,7 +33,7 @@ func DumpDatabase(db configs.DBConfig, backupDir string) (string, error) {
 	defer outFile.Close()
 
 	cmd.Stdout = outFile
-	//cmd.Stderr = os.Stderr
+	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return "", err
 	}

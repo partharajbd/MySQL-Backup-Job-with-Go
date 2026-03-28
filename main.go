@@ -34,6 +34,7 @@ func loadAppConfig() (*configs.AppConfig, error) {
 		S3Bucket:   os.Getenv("S3_BUCKET"),
 		Region:     os.Getenv("AWS_REGION"),
 		S3Endpoint: os.Getenv("S3_ENDPOINT"),
+		S3RootDir:  os.Getenv("S3_ROOT_DIR"),
 	}, nil
 }
 
@@ -84,7 +85,7 @@ func main() {
 		panic(err)
 	}
 
-	os.MkdirAll(appConfig.BackupDir, os.ModePerm)
+	os.RemoveAll(appConfig.BackupDir)
 
 	numWorkers := 3
 	if len(dbConfigs) < numWorkers {
@@ -119,10 +120,10 @@ func main() {
 
 	for result := range results {
 		if result.Error != nil {
-			fmt.Printf("Failed to process %s: %v\n", result.DBName, result.Error)
+			fmt.Printf("> Failed to process %s: %v\n", result.DBName, result.Error)
 			failureCount++
 		} else {
-			fmt.Printf("Successfully processed %s.\n", result.DBName)
+			fmt.Printf("> Successfully processed %s.\n", result.DBName)
 			successCount++
 		}
 	}
