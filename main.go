@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,9 @@ import (
 
 	"mysql-database-backup-manager/configs"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/joho/godotenv"
 )
 
@@ -26,10 +30,11 @@ func loadConfig() (*configs.AppConfig, error) {
 	}
 
 	return &configs.AppConfig{
-		Databases: dbConfigs,
-		BackupDir: os.Getenv("BACKUP_DIR"),
-		S3Bucket:  os.Getenv("S3_BUCKET"),
-		Region:    os.Getenv("AWS_REGION"),
+		Databases:  dbConfigs,
+		BackupDir:  os.Getenv("BACKUP_DIR"),
+		S3Bucket:   os.Getenv("S3_BUCKET"),
+		Region:     os.Getenv("AWS_REGION"),
+		S3Endpoint: os.Getenv("S3_ENDPOINT"),
 	}, nil
 }
 
@@ -63,6 +68,40 @@ func dumpDatabase(db configs.DBConfig, backupDir string) (string, error) {
 	return fileName, nil
 }
 
+func uploadToS3(filePath string, appConfig *configs.AppConfig, key string) error {
+	ctx := context.Background()
+
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(appConfig.Region))
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		if endpoint := appConfig.S3Endpoint; endpoint != "" {
+			o.BaseEndpoint = aws.String(endpoint)
+		}
+		o.UsePathStyle = true
+	})
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(appConfig.S3Bucket),
+		Key:    aws.String(key),
+		Body:   file,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to upload to S3: %w", err)
+	}
+
+	fmt.Printf("Successfully uploaded %s to s3://%s/%s\n", filePath, appConfig.S3Bucket, key)
+	return nil
+}
+
 func main() {
 	config, err := loadConfig()
 	if err != nil {
@@ -72,6 +111,19 @@ func main() {
 	os.MkdirAll(config.BackupDir, os.ModePerm)
 
 	for _, db := range config.Databases {
-		dumpDatabase(db, config.BackupDir)
+		// Dump database
+		fileName, err := dumpDatabase(db, config.BackupDir)
+		if err != nil {
+			fmt.Printf("Error dumping database %s: %v\n", db.Name, err)
+			continue
+		}
+		fmt.Println("Dump completed: " + db.Name)
+
+		// Upload to S3
+		filePath := filepath.Join(config.BackupDir, fileName)
+		err = uploadToS3(filePath, config, fileName)
+		if err != nil {
+			fmt.Printf("Error uploading %s: %v\n", fileName, err)
+		}
 	}
 }
