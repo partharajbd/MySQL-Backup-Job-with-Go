@@ -41,6 +41,5 @@ func UploadToS3(filePath string, appConfig *configs.AppConfig, key string) error
 		return fmt.Errorf("failed to upload to S3: %w", err)
 	}
 
-	fmt.Printf("Successfully uploaded %s to s3://%s/%s\n", filePath, appConfig.S3Bucket, key)
 	return nil
 }
