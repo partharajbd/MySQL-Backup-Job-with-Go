@@ -8,6 +8,7 @@ import (
 	"mysql-database-backup-manager/storage"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 
 	"github.com/joho/godotenv"
@@ -29,12 +30,16 @@ func loadAppConfig() (*configs.AppConfig, error) {
 		return nil, err
 	}
 
+	retentionStr := os.Getenv("BACKUP_RETENTION")
+	retentionInt, err := strconv.Atoi(retentionStr)
+
 	return &configs.AppConfig{
-		BackupDir:  os.Getenv("BACKUP_DIR"),
-		S3Bucket:   os.Getenv("S3_BUCKET"),
-		Region:     os.Getenv("AWS_REGION"),
-		S3Endpoint: os.Getenv("S3_ENDPOINT"),
-		S3RootDir:  os.Getenv("S3_ROOT_DIR"),
+		BackupDir:       os.Getenv("BACKUP_DIR"),
+		BackupRetention: retentionInt,
+		S3Bucket:        os.Getenv("S3_BUCKET"),
+		Region:          os.Getenv("AWS_REGION"),
+		S3Endpoint:      os.Getenv("S3_ENDPOINT"),
+		S3RootDir:       os.Getenv("S3_ROOT_DIR"),
 	}, nil
 }
 
@@ -130,4 +135,9 @@ func main() {
 
 	fmt.Printf("\nTotal: %d | Success: %d | Failed: %d\n",
 		len(dbConfigs), successCount, failureCount)
+
+	fmt.Println("\n=== Cleanup Phase ===")
+	if err := storage.DeleteOldBackups(appConfig, appConfig.BackupRetention); err != nil {
+		fmt.Printf("Warning: Failed to clean old backups: %v\n", err)
+	}
 }
