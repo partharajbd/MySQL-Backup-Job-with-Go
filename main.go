@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"mysql-database-backup-manager/configs"
 	"mysql-database-backup-manager/database"
+	"mysql-database-backup-manager/notification"
 	"mysql-database-backup-manager/storage"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -30,16 +32,19 @@ func loadAppConfig() (*configs.AppConfig, error) {
 		return nil, err
 	}
 
-	retentionStr := os.Getenv("BACKUP_RETENTION")
-	retentionInt, err := strconv.Atoi(retentionStr)
+	slackEnabled := false
+	if enabled := os.Getenv("SLACK_ENABLED"); enabled == "true" {
+		slackEnabled = true
+	}
 
 	return &configs.AppConfig{
 		BackupDir:       os.Getenv("BACKUP_DIR"),
-		BackupRetention: retentionInt,
 		S3Bucket:        os.Getenv("S3_BUCKET"),
 		Region:          os.Getenv("AWS_REGION"),
 		S3Endpoint:      os.Getenv("S3_ENDPOINT"),
 		S3RootDir:       os.Getenv("S3_ROOT_DIR"),
+		SlackWebhookURL: os.Getenv("SLACK_WEBHOOK_URL"),
+		SlackEnabled:    slackEnabled,
 	}, nil
 }
 
@@ -80,13 +85,23 @@ func worker(id int, jobs <-chan Job, results chan<- Result, wg *sync.WaitGroup) 
 }
 
 func main() {
+	startTime := time.Now()
+
 	appConfig, err := loadAppConfig()
 	if err != nil {
 		panic(err)
 	}
 
+	// Create Slack config
+	slackConfig := notification.SlackConfig{
+		WebhookURL: appConfig.SlackWebhookURL,
+		Enabled:    appConfig.SlackEnabled,
+	}
+
 	dbConfigs, err := loadDbConfig()
 	if err != nil {
+		// Send critical error to Slack
+		notification.SendErrorAlert(slackConfig, fmt.Sprintf("Failed to load database config: %v", err), appConfig.ServerName)
 		panic(err)
 	}
 
@@ -122,11 +137,13 @@ func main() {
 	fmt.Println("\n=== Backup Summary ===")
 	successCount := 0
 	failureCount := 0
+	var failedDBs []string
 
 	for result := range results {
 		if result.Error != nil {
 			fmt.Printf("> Failed to process %s: %v\n", result.DBName, result.Error)
 			failureCount++
+			failedDBs = append(failedDBs, result.DBName)
 		} else {
 			fmt.Printf("> Successfully processed %s.\n", result.DBName)
 			successCount++
@@ -136,8 +153,39 @@ func main() {
 	fmt.Printf("\nTotal: %d | Success: %d | Failed: %d\n",
 		len(dbConfigs), successCount, failureCount)
 
+	// Clean up old backups from S3
 	fmt.Println("\n=== Cleanup Phase ===")
-	if err := storage.DeleteOldBackups(appConfig, appConfig.BackupRetention); err != nil {
-		fmt.Printf("Warning: Failed to clean old backups: %v\n", err)
+	deletedCount := 0
+	retentionDays := 7
+
+	// Get retention days from env if set
+	if retentionEnv := os.Getenv("RETENTION_DAYS"); retentionEnv != "" {
+		if days, err := strconv.Atoi(retentionEnv); err == nil {
+			retentionDays = days
+		}
 	}
+
+	if count, err := storage.DeleteOldBackups(appConfig, retentionDays); err != nil {
+		fmt.Printf("Warning: Failed to clean old backups: %v\n", err)
+	} else {
+		deletedCount = count
+	}
+
+	duration := time.Since(startTime)
+
+	// Send summary to Slack
+	summary := notification.BackupSummary{
+		Total:        len(dbConfigs),
+		Success:      successCount,
+		Failed:       failureCount,
+		FailedDBs:    failedDBs,
+		DeletedCount: deletedCount,
+		Duration:     duration,
+	}
+
+	if err := notification.SendBackupSummary(slackConfig, summary); err != nil {
+		fmt.Printf("Warning: Failed to send Slack notification: %v\n", err)
+	}
+
+	fmt.Printf("\n✓ Backup process completed in %.2fs\n", duration.Seconds())
 }

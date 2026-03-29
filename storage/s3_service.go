@@ -53,12 +53,12 @@ func UploadToS3(filePath string, appConfig *configs.AppConfig, key string) error
 	return nil
 }
 
-func DeleteOldBackups(appConfig *configs.AppConfig, retentionDays int) error {
+func DeleteOldBackups(appConfig *configs.AppConfig, retentionDays int) (int, error) {
 	ctx := context.Background()
 
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(appConfig.Region))
 	if err != nil {
-		return fmt.Errorf("failed to load AWS config: %w", err)
+		return 0, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
@@ -87,7 +87,7 @@ func DeleteOldBackups(appConfig *configs.AppConfig, retentionDays int) error {
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to list objects: %w", err)
+			return 0, fmt.Errorf("failed to list objects: %w", err)
 		}
 
 		for _, obj := range page.Contents {
@@ -103,7 +103,7 @@ func DeleteOldBackups(appConfig *configs.AppConfig, retentionDays int) error {
 
 	if len(objectsToDelete) == 0 {
 		fmt.Println("No old backups found to delete.")
-		return nil
+		return 0, nil
 	}
 
 	batchSize := 1000
@@ -122,12 +122,12 @@ func DeleteOldBackups(appConfig *configs.AppConfig, retentionDays int) error {
 			},
 		})
 		if err != nil {
-			return fmt.Errorf("failed to delete objects: %w", err)
+			return 0, fmt.Errorf("failed to delete objects: %w", err)
 		}
 
 		deletedCount += len(batch)
 	}
 
 	fmt.Printf("\nSuccessfully deleted %d old backup(s) from S3.\n", deletedCount)
-	return nil
+	return deletedCount, nil
 }

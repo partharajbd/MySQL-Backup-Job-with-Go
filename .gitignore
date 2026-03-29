@@ -1,6 +1,7 @@
 .idea
 .env
 **.sql
+**/.DS_Store
 
 # Built executable file
 /mysql-database-backup-manager
